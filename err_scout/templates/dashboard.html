@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>err-scout Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+        h1 { font-size: 1.5rem; color: #f43f5e; }
+        .search { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 0.5rem 1rem; color: #e2e8f0; width: 300px; font-size: 0.875rem; }
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2rem; }
+        .stat { background: #1e293b; border-radius: 12px; padding: 1.25rem; }
+        .stat-value { font-size: 2rem; font-weight: 700; }
+        .stat-value.danger { color: #f43f5e; }
+        .stat-value.total { color: #38bdf8; }
+        .stat-label { font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem; }
+        .charts { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; margin-bottom: 2rem; }
+        .chart-box { background: #1e293b; border-radius: 12px; padding: 1.25rem; }
+        .chart-box h3 { font-size: 0.875rem; color: #94a3b8; margin-bottom: 1rem; }
+        canvas { max-height: 200px; }
+        .error-list { background: #1e293b; border-radius: 12px; overflow: hidden; }
+        .error-item { padding: 1rem 1.25rem; border-bottom: 1px solid #1e293b; cursor: pointer; transition: background 0.15s; display: flex; align-items: flex-start; gap: 1rem; }
+        .error-item:hover { background: #334155; }
+        .error-count { background: #f43f5e; color: white; font-weight: 700; padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.8rem; min-width: 3rem; text-align: center; flex-shrink: 0; }
+        .error-info { flex: 1; min-width: 0; }
+        .error-exception { font-weight: 600; font-size: 0.9rem; color: #f8fafc; }
+        .error-message { font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .error-meta { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
+        .error-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+        .btn { padding: 0.25rem 0.75rem; border-radius: 6px; border: none; font-size: 0.75rem; cursor: pointer; }
+        .btn-resolve { background: #166534; color: #4ade80; }
+        .btn-ignore { background: #44403c; color: #a8a29e; }
+        .status-badge { font-size: 0.7rem; padding: 1px 6px; border-radius: 4px; }
+        .status-unresolved { background: #7f1d1d; color: #fca5a5; }
+        .status-resolved { background: #14532d; color: #86efac; }
+        .status-regression { background: #78350f; color: #fde68a; }
+        .status-ignored { background: #1c1917; color: #78716c; }
+        .detail-header { background: #1e293b; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }
+        .detail-header h2 { color: #f43f5e; margin-bottom: 0.5rem; }
+        .stack-trace { background: #0f172a; padding: 1rem; border-radius: 8px; font-family: 'SF Mono', monospace; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; color: #94a3b8; margin-top: 1rem; max-height: 300px; overflow-y: auto; }
+        .event-item { background: #1e293b; border-radius: 8px; padding: 1rem; margin-bottom: 0.5rem; }
+        .event-item .meta { font-size: 0.75rem; color: #64748b; }
+        a { color: #38bdf8; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><a href="/" style="color:#f43f5e">err-scout</a></h1>
+            <input type="text" class="search" placeholder="Search errors..." id="searchInput" onkeyup="handleSearch(event)">
+        </header>
+
+        {% if detail_mode %}
+        <!-- GROUP DETAIL VIEW -->
+        <div class="detail-header">
+            <h2>{{ group.exception }}</h2>
+            <p style="color:#94a3b8">{{ group.message_template }}</p>
+            <p class="error-meta">
+                First seen: {{ group.first_seen }} |
+                Last seen: {{ group.last_seen }} |
+                Occurrences: {{ group.count }} |
+                <span class="status-badge status-{{ group.status }}">{{ group.status }}</span>
+            </p>
+            {% if group.culprit_frame %}
+            <div class="stack-trace">{{ group.culprit_frame }}</div>
+            {% endif %}
+            <div style="margin-top:1rem">
+                <form method="POST" action="/resolve/{{ group.group_id }}" style="display:inline">
+                    <button class="btn btn-resolve">Resolve</button>
+                </form>
+                <form method="POST" action="/ignore/{{ group.group_id }}" style="display:inline">
+                    <button class="btn btn-ignore">Ignore</button>
+                </form>
+            </div>
+        </div>
+
+        <h3 style="margin-bottom:1rem;color:#94a3b8">Recent Events</h3>
+        {% for event in events %}
+        <div class="event-item">
+            <div class="error-exception">{{ event.exception }}: {{ event.message }}</div>
+            <div class="meta">
+                {{ event.timestamp }} |
+                env: {{ event.environment }} |
+                release: {{ event.release or 'N/A' }} |
+                user: {{ event.user_id or 'N/A' }}
+            </div>
+            {% if event.stack_trace %}
+            <div class="stack-trace">{{ event.stack_trace }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+
+        {% else %}
+        <!-- MAIN DASHBOARD VIEW -->
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value danger">{{ unresolved }}</div>
+                <div class="stat-label">Unresolved Errors</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value total">{{ total_groups }}</div>
+                <div class="stat-label">Error Groups</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value total">{{ total_events }}</div>
+                <div class="stat-label">Total Events</div>
+            </div>
+        </div>
+
+        <div class="charts">
+            <div class="chart-box">
+                <h3>Error Timeline (24h)</h3>
+                <canvas id="timelineChart"></canvas>
+            </div>
+            <div class="chart-box">
+                <h3>By Release</h3>
+                <canvas id="releaseChart"></canvas>
+            </div>
+        </div>
+
+        <div class="error-list" id="errorList">
+            {% for g in groups %}
+            <div class="error-item" onclick="window.location='/group/{{ g.group_id }}'">
+                <div class="error-count">{{ g.count }}</div>
+                <div class="error-info">
+                    <div class="error-exception">
+                        {{ g.exception }}
+                        <span class="status-badge status-{{ g.status }}">{{ g.status }}</span>
+                    </div>
+                    <div class="error-message">{{ g.message_template }}</div>
+                    <div class="error-meta">
+                        Last: {{ g.last_seen }} |
+                        Envs: {{ g.environments | join(', ') }}
+                        {% if g.releases %} | Releases: {{ g.releases | join(', ') }}{% endif %}
+                    </div>
+                </div>
+                <div class="error-actions">
+                    <form method="POST" action="/resolve/{{ g.group_id }}" onclick="event.stopPropagation()">
+                        <button class="btn btn-resolve" type="submit">Resolve</button>
+                    </form>
+                    <form method="POST" action="/ignore/{{ g.group_id }}" onclick="event.stopPropagation()">
+                        <button class="btn btn-ignore" type="submit">Ignore</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <script>
+            const tLabels = {{ timeline_labels | safe }};
+            const tData = {{ timeline_data | safe }};
+            new Chart(document.getElementById('timelineChart'), {
+                type: 'line',
+                data: {
+                    labels: tLabels,
+                    datasets: [{
+                        label: 'Events',
+                        data: tData,
+                        borderColor: '#f43f5e',
+                        backgroundColor: 'rgba(244,63,94,0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } },
+                        y: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } }
+                    }
+                }
+            });
+
+            const rLabels = {{ release_labels | safe }};
+            const rData = {{ release_data | safe }};
+            if (rLabels.length > 0) {
+                new Chart(document.getElementById('releaseChart'), {
+                    type: 'doughnut',
+                    data: {
+                        labels: rLabels,
+                        datasets: [{
+                            data: rData,
+                            backgroundColor: ['#f43f5e','#38bdf8','#4ade80','#fbbf24','#a78bfa','#fb923c']
+                        }]
+                    },
+                    options: {
+                        plugins: { legend: { labels: { color: '#94a3b8' }, position: 'bottom' } }
+                    }
+                });
+            }
+
+            function handleSearch(e) {
+                if (e.key === 'Enter') {
+                    const q = document.getElementById('searchInput').value;
+                    fetch('/api/search?q=' + encodeURIComponent(q))
+                        .then(r => r.json())
+                        .then(data => {
+                            const list = document.getElementById('errorList');
+                            if (data.groups.length === 0) {
+                                list.innerHTML = '<div style="padding:2rem;text-align:center;color:#64748b">No results found</div>';
+                                return;
+                            }
+                            list.innerHTML = data.groups.map(g => `
+                                <div class="error-item" onclick="window.location='/group/${g.group_id}'">
+                                    <div class="error-count">${g.count}</div>
+                                    <div class="error-info">
+                                        <div class="error-exception">${g.exception}</div>
+                                        <div class="error-message">${g.message_template}</div>
+                                    </div>
+                                </div>
+                            `).join('');
+                        });
+                }
+            }
+        </script>
+        {% endif %}
+    </div>
+</body>
+</html>
