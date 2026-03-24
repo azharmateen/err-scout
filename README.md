@@ -1,5 +1,8 @@
 # err-scout
 
+[![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-blue?logo=anthropic&logoColor=white)](https://claude.ai/code)
+
+
 **Lightweight error tracking: collect, group, and triage exceptions without Sentry.**
 
 > You need error tracking. You do not need a $29/month SaaS with 200 features you will never use. **err-scout** is a single-binary error tracker with a FastAPI ingest server, SQLite storage, smart grouping, a dashboard, and alerting -- all in one `pip install`.
